@@ -3,9 +3,9 @@ import { useDispatch, useSelector } from 'react-redux'
 import { format } from 'date-fns'
 import {
   FileText, Calendar, Hash, Package, Truck, User, AlertTriangle,
-  Loader2, CheckCircle, AlertCircle, Info, Save, Edit3, Check, X, Sparkles
+  Loader2, CheckCircle, AlertCircle, Info, Save, Edit3, Check, X, Sparkles, Trash2
 } from 'lucide-react'
-import { updateDeviation, fetchDeviation } from '../store/deviationSlice'
+import { updateDeviation, fetchDeviation, clearExtractedData, clearChatMessages } from '../store/deviationSlice'
 import { clsx } from 'clsx'
 
 const severityColors = {
@@ -58,29 +58,30 @@ export default function DeviationForm() {
   const [showAIReview, setShowAIReview] = useState(false)
   const [reviewDecisions, setReviewDecisions] = useState({})
 
+  // Fetch deviation only when ID changes
   useEffect(() => {
     if (current?.id) {
       dispatch(fetchDeviation(current.id))
     }
   }, [current?.id, dispatch])
 
-  // Show AI review when extracted data is available
-  useEffect(() => {
-    if (extractedData && Object.keys(extractedData).length > 0) {
-      setShowAIReview(true)
-      // Initialize review decisions
-      const decisions = {}
-      Object.keys(extractedData).forEach(key => {
-        decisions[key] = 'pending'
+  // Don't auto-show AI review - let user trigger it from AI panel
+  const handleAcceptAll = () => {
+    if (!extractedData || !current) return
+    Object.keys(extractedData).forEach(field => {
+      const suggestion = getAISuggestion(field)
+      if (suggestion) {
+        handleChange(field, suggestion)
+      }
+    })
+    setReviewDecisions(prev => {
+      const next = { ...prev }
+      Object.keys(extractedData).forEach(field => {
+        if (getAISuggestion(field)) next[field] = 'accepted'
       })
-      setReviewDecisions(decisions)
-    }
-  }, [extractedData])
-
-  const handleChange = (field, value) => {
-    if (current) {
-      dispatch(updateDeviation({ id: current.id, data: { [field]: value } }))
-    }
+      return next
+    })
+    setShowAIReview(false)
   }
 
   const getAISuggestion = (field) => {
@@ -105,22 +106,41 @@ export default function DeviationForm() {
     setReviewDecisions(prev => ({ ...prev, [field]: 'rejected' }))
   }
 
-  const acceptAll = () => {
-    if (!extractedData || !current) return
-    Object.keys(extractedData).forEach(field => {
-      const suggestion = getAISuggestion(field)
-      if (suggestion) {
-        handleChange(field, suggestion)
-      }
-    })
-    setReviewDecisions(prev => {
-      const next = { ...prev }
-      Object.keys(extractedData).forEach(field => {
-        if (getAISuggestion(field)) next[field] = 'accepted'
-      })
-      return next
-    })
-    setShowAIReview(false)
+  const handleChange = (field, value) => {
+    if (current) {
+      dispatch(updateDeviation({ id: current.id, data: { [field]: value } }))
+    }
+  }
+
+  const handleDateChange = (field, date) => {
+    if (date) {
+      handleChange(field, date.toISOString().split('T')[0])
+    }
+  }
+
+  const renderAIBadge = (field) => {
+    if (!hasAISuggestion(field)) return null
+    const decision = reviewDecisions[field]
+    if (decision === 'accepted') {
+      return (
+        <span className="ml-2 px-2 py-0.5 text-xs bg-green-50 text-green-700 rounded-full flex items-center gap-1">
+          <Check className="w-3 h-3" /> AI Applied
+        </span>
+      )
+    }
+    if (decision === 'rejected') {
+      return (
+        <span className="ml-2 px-2 py-0.5 text-xs bg-gray-100 text-gray-500 rounded-full flex items-center gap-1">
+          <X className="w-3 h-3" /> AI Rejected
+        </span>
+      )
+    }
+    return (
+      <span className="ml-2 px-2 py-0.5 text-xs bg-primary-50 text-primary-700 rounded-full flex items-center gap-1">
+        <Sparkles className="w-3 h-3" />
+        AI Available
+      </span>
+    )
   }
 
   const renderField = ({ label, name, type = 'text', required = false, options, ...props }) => {
@@ -135,7 +155,7 @@ export default function DeviationForm() {
           {showAIIndicator && (
             <span className="flex items-center gap-1 text-xs px-2 py-0.5 bg-primary-50 text-primary-700 rounded-full">
               <Sparkles className="w-3 h-3" />
-              AI suggested
+              AI Available
             </span>
           )}
         </div>
@@ -180,37 +200,22 @@ export default function DeviationForm() {
               {...props}
             />
           )}
-          {showAIIndicator && aiValue && decision === 'pending' && (
-            <div className="absolute bottom-full left-0 right-0 mb-1 p-2 bg-primary-50 border border-primary-200 rounded-lg shadow-lg z-10">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-primary-700">AI suggests: <strong>{aiValue.substring(0, 100)}{aiValue.length > 100 ? '...' : ''}</strong></span>
-                <div className="flex gap-2">
-                  <button
-                    className="btn-primary btn-sm"
-                    onClick={() => acceptField(name)}
-                  >
-                    <Check className="w-3.5 h-3.5 mr-1" /> Accept
-                  </button>
-                  <button
-                    className="btn-secondary btn-sm"
-                    onClick={() => rejectField(name)}
-                  >
-                    <X className="w-3.5 h-3.5 mr-1" /> Reject
-                  </button>
-                </div>
+          {renderAIBadge(name)}
+        </div>
+        {showAIIndicator && aiValue && decision === 'pending' && (
+          <div className="absolute bottom-full left-0 right-0 mb-1 p-2 bg-primary-50 border border-primary-200 rounded-lg shadow-lg z-10">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-primary-700">AI suggests: <strong>{aiValue.substring(0, 100)}{aiValue.length > 100 ? '...' : ''}</strong></span>
+              <div className="flex gap-2">
+                <button className="btn-primary btn-sm" onClick={() => acceptField(name)}>
+                  <Check className="w-3.5 h-3.5 mr-1" /> Accept
+                </button>
+                <button className="btn-secondary btn-sm" onClick={() => rejectField(name)}>
+                  <X className="w-3.5 h-3.5 mr-1" /> Reject
+                </button>
               </div>
             </div>
-          )}
-        </div>
-        {showAIIndicator && decision === 'accepted' && (
-          <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
-            <CheckCircle className="w-3.5 h-3.5" /> Accepted AI suggestion
-          </p>
-        )}
-        {showAIIndicator && decision === 'rejected' && (
-          <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
-            <X className="w-3.5 h-3.5" /> AI suggestion rejected
-          </p>
+          </div>
         )}
       </div>
     )
@@ -258,116 +263,6 @@ export default function DeviationForm() {
           Save & Submit
         </button>
       </div>
-
-      {/* AI Review Banner */}
-      {extractedData && Object.keys(extractedData).length > 0 && (
-        <div className={`border-b border-gray-100 transition-all duration-300 ${showAIReview ? '' : 'bg-primary-50'}`}>
-          <div className="p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-primary-100 rounded-lg flex items-center justify-center">
-                  <Sparkles className="w-5 h-5 text-primary-600" />
-                </div>
-                <div>
-                  <h3 className="font-medium text-gray-900">AI Extraction Complete</h3>
-                  <p className="text-sm text-gray-500">
-                    {Object.keys(extractedData).length} fields extracted with {Math.round(extractionConfidence * 100)}% confidence
-                  </p>
-                </div>
-              </div>
-              <div className="flex gap-2">
-                {showAIReview ? (
-                  <>
-                    <button
-                      className="btn-secondary btn-sm"
-                      onClick={() => setShowAIReview(false)}
-                    >
-                      <X className="w-3.5 h-3.5 mr-1.5" />
-                      Hide Review
-                    </button>
-                    <button
-                      className="btn-primary btn-sm"
-                      onClick={acceptAll}
-                    >
-                      <CheckCircle className="w-3.5 h-3.5 mr-1.5" />
-                      Accept All & Continue
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    className="btn-primary"
-                    onClick={() => setShowAIReview(true)}
-                  >
-                    <Sparkles className="w-4 h-4 mr-2" />
-                    Review AI Suggestions
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* AI Review Panel - Expanded */}
-      {showAIReview && extractedData && (
-        <div className="p-4 bg-primary-50 border-b border-primary-100">
-          <div className="mb-4">
-            <h4 className="font-medium text-gray-900 mb-3">Review each AI-suggested field:</h4>
-            <div className="space-y-3 max-h-96 overflow-y-auto">
-              {formFields
-                .filter(f => hasAISuggestion(f.name))
-                .map((field) => {
-                  const aiValue = getAISuggestion(field.name)
-                  const decision = reviewDecisions[field.name]
-                  return (
-                    <div key={field.name} className="p-3 bg-white border rounded-lg">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex-1">
-                          <p className="text-sm font-medium text-gray-700">{field.label}</p>
-                          <p className="text-sm text-primary-700 bg-primary-50 px-2 py-1 rounded font-mono mt-1 inline-block max-w-full truncate">
-                            {aiValue}
-                          </p>
-                        </div>
-                        {decision === 'pending' ? (
-                          <div className="flex gap-2 flex-shrink-0">
-                            <button
-                              className="btn-primary btn-sm"
-                              onClick={() => acceptField(field.name)}
-                            >
-                              <Check className="w-3.5 h-3.5 mr-1" /> Accept
-                            </button>
-                            <button
-                              className="btn-secondary btn-sm"
-                              onClick={() => rejectField(field.name)}
-                            >
-                              <X className="w-3.5 h-3.5 mr-1" /> Reject
-                            </button>
-                          </div>
-                        ) : decision === 'accepted' ? (
-                          <span className="text-green-600 text-sm font-medium flex items-center gap-1">
-                            <CheckCircle className="w-3.5 h-3.5" /> Accepted
-                          </span>
-                        ) : (
-                          <span className="text-gray-500 text-sm font-medium flex items-center gap-1">
-                            <X className="w-3.5 h-3.5" /> Rejected
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
-            </div>
-          </div>
-          <div className="flex gap-2 justify-end">
-            <button
-              className="btn-secondary"
-              onClick={() => setShowAIReview(false)}
-            >
-              Done Reviewing
-            </button>
-          </div>
-        </div>
-      )}
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-thin">
         <div className="grid gap-4 md:grid-cols-2">
@@ -418,9 +313,13 @@ export default function DeviationForm() {
           </div>
         )}
 
-        {renderField(formFields.find(f => f.name === 'severity'))}
+        <div className="grid gap-4 md:grid-cols-2">
+          {renderField(formFields.find(f => f.name === 'severity'))}
+        </div>
 
-        {renderField(formFields.find(f => f.name === 'impact_assessment'))}
+        <div>
+          {renderField(formFields.find(f => f.name === 'impact_assessment'))}
+        </div>
 
         <div className="grid gap-4 md:grid-cols-2">
           {formFields
@@ -436,7 +335,7 @@ export default function DeviationForm() {
           <details className="border-t border-gray-100 pt-4">
             <summary className="font-medium text-gray-900 cursor-pointer flex items-center gap-2">
               <Info className="w-5 h-5 text-primary-600" />
-              View Raw AI Extracted Data (Confidence: {Math.round(extractionConfidence * 100)}%)
+              AI Extracted Data (Confidence: {Math.round(extractionConfidence * 100)}%)
             </summary>
             <div className="bg-gray-50 p-3 rounded-lg text-sm font-mono max-h-48 overflow-auto mt-2">
               <pre>{JSON.stringify(extractedData, null, 2)}</pre>

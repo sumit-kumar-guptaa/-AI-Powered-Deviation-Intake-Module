@@ -6,7 +6,7 @@ import {
 } from '../store/deviationSlice'
 import {
   FileText, Upload, Send, Loader2, Sparkles, Trash2, Copy,
-  CheckCircle, AlertTriangle, Info, Mic2, Paperclip
+  CheckCircle, AlertTriangle, Info, Mic2, Paperclip, RotateCcw
 } from 'lucide-react'
 import { clsx } from 'clsx'
 
@@ -112,9 +112,23 @@ export default function AIPanel() {
   return (
     <div className="card h-full flex flex-col">
       <div className="p-4 border-b border-gray-100">
-        <div className="flex items-center gap-2 mb-4">
-          <Sparkles className="w-6 h-6 text-primary-600" />
-          <h2 className="text-lg font-semibold text-gray-900">AI Copilot</h2>
+        <div className="flex items-center justify-between gap-2 mb-4">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-6 h-6 text-primary-600" />
+            <h2 className="text-lg font-semibold text-gray-900">AI Copilot</h2>
+          </div>
+          {(extractedData || impactAssessment) && (
+            <button
+              className="btn-ghost p-2 text-red-500 hover:bg-red-50"
+              onClick={() => {
+                dispatch(clearExtractedData())
+                dispatch(clearChatMessages())
+              }}
+              title="Clear AI data"
+            >
+              <Trash2 className="w-5 h-5" />
+            </button>
+          )}
         </div>
         <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
           <button
@@ -305,7 +319,17 @@ function ExtractTab({
 
           {impactAssessment && (
             <div className="p-3 bg-primary-50 border border-primary-200 rounded-lg">
-              <h4 className="font-medium text-gray-900 mb-2">AI Impact Assessment</h4>
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="font-medium text-gray-900">AI Impact Assessment</h4>
+                <button
+                  className="btn-ghost p-1 text-xs text-primary-600 hover:bg-primary-50"
+                  onClick={handleAssessImpact}
+                  disabled={aiLoading}
+                  title="Re-run assessment"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                </button>
+              </div>
               <div className="mb-2">
                 <span className={clsx('badge', severityColors[impactAssessment.severity])}>
                   {impactAssessment.severity}
