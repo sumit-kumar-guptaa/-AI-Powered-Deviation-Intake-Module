@@ -6,11 +6,23 @@ import {
 } from '../store/deviationSlice'
 import {
   FileText, Upload, Send, Loader2, Sparkles, Trash2, Copy,
-  CheckCircle, AlertTriangle, Info, Mic2, Paperclip, RotateCcw
+  CheckCircle, AlertTriangle, Info, Mic2, Paperclip, RotateCcw,
+  ArrowRight, Check, X, Zap, FileCheck, ClipboardCheck, Save
 } from 'lucide-react'
 import { clsx } from 'clsx'
 
 const SUPPORTED_TYPES = ['.pdf', '.doc', '.docx', '.txt', '.eml', '.msg']
+
+// Workflow steps for visual progress indicator
+const WORKFLOW_STEPS = [
+  { id: 1, key: 'input', label: 'Input', icon: FileText, desc: 'Paste text or upload file' },
+  { id: 2, key: 'process', label: 'AI Processing', icon: Zap, desc: 'AI extracts structured data' },
+  { id: 3, key: 'form', label: 'Extracted Form', icon: FileCheck, desc: 'Fields auto-populated' },
+  { id: 4, key: 'impact', label: 'Impact/Severity', icon: AlertTriangle, desc: 'AI risk assessment' },
+  { id: 5, key: 'review', label: 'Review', icon: ClipboardCheck, desc: 'Accept/Reject fields' },
+  { id: 6, key: 'save', label: 'Save', icon: Save, desc: 'Submit deviation' },
+  { id: 7, key: 'complete', label: 'Submitted', icon: CheckCircle, desc: 'Deviation submitted' },
+]
 
 export default function AIPanel() {
   const dispatch = useDispatch()
@@ -52,9 +64,25 @@ export default function AIPanel() {
         await dispatch(extractDeviationInfo({ text: inputText })).unwrap()
       }
       
-      // If no current deviation exists, create one with extracted data
-      if (!currentDeviation) {
-        const extracted = extractedData || {}
+      // Auto-populate form with extracted data
+      const extracted = extractedData || {}
+      if (currentDeviation) {
+        // Update existing deviation with extracted data
+        await dispatch(updateDeviation({
+          id: currentDeviation.id,
+          data: {
+            title: extracted.title || currentDeviation.title,
+            description: extracted.description || currentDeviation.description,
+            batch_number: extracted.batch_number || currentDeviation.batch_number,
+            product_name: extracted.product_name || currentDeviation.product_name,
+            process_step: extracted.process_step || currentDeviation.process_step,
+            equipment_id: extracted.equipment_id || currentDeviation.equipment_id,
+            deviation_date: extracted.deviation_date || currentDeviation.deviation_date,
+            reported_by: extracted.reported_by || currentDeviation.reported_by,
+          }
+        })).unwrap()
+      } else {
+        // Create new deviation with extracted data
         const newDeviation = await dispatch(createDeviation({
           title: extracted.title || 'AI Extracted Deviation',
           description: extracted.description || inputText,
@@ -157,6 +185,14 @@ export default function AIPanel() {
           </button>
         </div>
       </div>
+
+      {/* Workflow Progress Stepper */}
+      <WorkflowStepper 
+        extractedData={extractedData} 
+        impactAssessment={impactAssessment} 
+        aiLoading={aiLoading}
+        currentDeviation={currentDeviation}
+      />
 
       <div className="flex-1 overflow-y-auto p-4 scrollbar-thin">
         {activeTab === 'extract' && (
@@ -428,6 +464,94 @@ function ChatTab({
             Context: {currentDeviation.deviation_number} - {currentDeviation.title}
           </p>
         )}
+</div>
+    </div>
+  )
+}
+
+function WorkflowStepper({ extractedData, impactAssessment, aiLoading, currentDeviation }) {
+  // Determine current step based on state
+  const getCurrentStep = () => {
+    if (currentDeviation?.status === 'SUBMITTED') return 7
+    if (!extractedData || Object.keys(extractedData).length === 0) return 1
+    if (aiLoading) return 2
+    if (!impactAssessment) return 3
+    if (!currentDeviation) return 4
+    return 5 // Review step (user needs to review in left panel)
+  }
+
+  const currentStep = getCurrentStep()
+
+  return (
+    <div className="p-4 border-b border-gray-100 bg-gradient-to-r from-primary-50 to-white">
+      <div className="max-w-full mx-auto">
+        <div className="text-xs font-medium text-primary-700 mb-3 uppercase tracking-wider">
+          Workflow Progress
+        </div>
+        <div className="relative">
+          {/* Connector line */}
+          <div className="absolute top-5 left-0 right-0 h-1 bg-gray-200" />
+          <div className="relative flex items-center justify-between">
+            {WORKFLOW_STEPS.map((step, index) => {
+              const isActive = currentStep >= step.id
+              const isCurrent = currentStep === step.id
+              const isComplete = currentStep > step.id
+              
+              return (
+                <div key={step.key} className="flex flex-col items-center relative z-10">
+                  <div className={clsx(
+                    'w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all duration-300',
+                    isComplete ? 'bg-primary-600 border-primary-600 text-white' :
+                    isCurrent ? 'bg-primary-100 border-primary-600 text-primary-700' :
+                    'bg-white border-gray-300 text-gray-400'
+                  )}>
+                    {isComplete ? (
+                      <Check className="w-5 h-5" />
+                    ) : isCurrent && aiLoading && step.id === 2 ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <step.icon className={clsx('w-5 h-5', isCurrent ? 'text-primary-600' : '')} />
+                    )}
+                  </div>
+                  <div className="mt-2 text-center">
+                    <p className={clsx(
+                      'text-xs font-medium',
+                      isComplete ? 'text-primary-600' :
+                      isCurrent ? 'text-primary-700' :
+                      'text-gray-500'
+                    )}>
+                      {step.label}
+                    </p>
+                    <p className="text-[10px] text-gray-400 max-w-[80px] truncate">{step.desc}</p>
+                  </div>
+                  {/* Connector */}
+                  {index < WORKFLOW_STEPS.length - 1 && (
+                    <div className={clsx(
+                      'absolute top-5 left-1/2 w-full h-1',
+                      index < currentStep - 1 ? 'bg-primary-600' : 'bg-gray-200'
+                    )} />
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+        
+        {/* Step description */}
+        <div className="mt-3 p-3 bg-white rounded-lg border border-gray-100">
+          <p className="text-sm text-gray-600">
+            <span className="font-medium text-primary-700">
+              Step {currentStep} of {WORKFLOW_STEPS.length}:
+            </span>{' '}
+            {currentStep === 1 && 'Paste your deviation text or upload a document to begin'}
+            {currentStep === 2 && 'AI is processing your input and extracting structured data...'}
+            {currentStep === 3 && 'Fields have been auto-populated. Review the extracted data below.'}
+            {currentStep === 4 && 'Click "Assess Impact & Severity" to get AI risk assessment'}
+            {currentStep === 5 && 'Review AI suggestions in the left panel (Accept/Reject each field)'}
+            {currentStep === 6 && 'Click "Save & Submit" in the left panel to finalize'}
+            {currentStep === 7 && 'Deviation successfully submitted! All steps complete.'}
+          </p>
+        </div>
       </div>
     </div>
   )

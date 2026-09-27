@@ -3,10 +3,109 @@ import { useDispatch, useSelector } from 'react-redux'
 import { format } from 'date-fns'
 import {
   FileText, Calendar, Hash, Package, Truck, User, AlertTriangle,
-  Loader2, CheckCircle, AlertCircle, Info, Save, Edit3, Check, X, Sparkles, Trash2
+  Loader2, CheckCircle, AlertCircle, Info, Save, Edit3, Check, X, Sparkles, Trash2,
+  Zap, FileCheck, AlertTriangle as AlertTriangleIcon, ClipboardCheck
 } from 'lucide-react'
 import { updateDeviation, fetchDeviation, clearExtractedData, clearChatMessages } from '../store/deviationSlice'
 import { clsx } from 'clsx'
+
+// Workflow steps for left panel
+const LEFT_WORKFLOW_STEPS = [
+  { id: 1, key: 'input', label: 'Input', icon: FileText, desc: 'Deviation text/file' },
+  { id: 2, key: 'process', label: 'AI Processing', icon: Zap, desc: 'Extracting data...' },
+  { id: 3, key: 'form', label: 'Extracted Form', icon: FileCheck, desc: 'Fields populated' },
+  { id: 4, key: 'impact', label: 'Impact/Severity', icon: AlertTriangleIcon, desc: 'AI assessment' },
+  { id: 5, key: 'review', label: 'Review', icon: ClipboardCheck, desc: 'Accept/Reject' },
+  { id: 6, key: 'save', label: 'Save', icon: Save, desc: 'Submit' },
+  { id: 7, key: 'complete', label: 'Submitted', icon: CheckCircle, desc: 'Deviation submitted' },
+]
+
+function LeftWorkflowStepper({ extractedData, impactAssessment, aiLoading, current, showAIReview }) {
+  const getCurrentStep = () => {
+    // If submitted, show all steps as complete
+    if (current?.status === 'SUBMITTED') return 7
+    if (!extractedData || Object.keys(extractedData).length === 0) return 1
+    if (aiLoading) return 2
+    if (!impactAssessment) return 3
+    if (!showAIReview) return 4
+    if (!current?.severity) return 5
+    if (current?.status === 'DRAFT') return 6
+    return 6
+  }
+
+  const currentStep = getCurrentStep()
+
+  return (
+    <div className="p-4 border-b border-gray-100 bg-gradient-to-r from-primary-50 to-white">
+      <div className="max-w-full mx-auto">
+        <div className="text-xs font-medium text-primary-700 mb-3 uppercase tracking-wider">
+          Workflow Progress
+        </div>
+        <div className="relative">
+          <div className="absolute top-5 left-0 right-0 h-1 bg-gray-200" />
+          <div className="relative flex items-center justify-between">
+            {LEFT_WORKFLOW_STEPS.map((step, index) => {
+              const isActive = currentStep >= step.id
+              const isCurrent = currentStep === step.id
+              const isComplete = currentStep > step.id
+              
+              return (
+                <div key={step.key} className="flex flex-col items-center relative z-10">
+                  <div className={clsx(
+                    'w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all duration-300',
+                    isComplete ? 'bg-primary-600 border-primary-600 text-white' :
+                    isCurrent ? 'bg-primary-100 border-primary-600 text-primary-700' :
+                    'bg-white border-gray-300 text-gray-400'
+                  )}>
+                    {isComplete ? (
+                      <Check className="w-5 h-5" />
+                    ) : isCurrent && aiLoading && step.id === 2 ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <step.icon className={clsx('w-5 h-5', isCurrent ? 'text-primary-600' : '')} />
+                    )}
+                  </div>
+                  <div className="mt-2 text-center">
+                    <p className={clsx(
+                      'text-xs font-medium',
+                      isComplete ? 'text-primary-600' :
+                      isCurrent ? 'text-primary-700' :
+                      'text-gray-500'
+                    )}>
+                      {step.label}
+                    </p>
+                    <p className="text-[10px] text-gray-400 max-w-[80px] truncate">{step.desc}</p>
+                  </div>
+                  {index < LEFT_WORKFLOW_STEPS.length - 1 && (
+                    <div className={clsx(
+                      'absolute top-5 left-1/2 w-full h-1',
+                      index < currentStep - 1 ? 'bg-primary-600' : 'bg-gray-200'
+                    )} />
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+        
+        <div className="mt-3 p-3 bg-white rounded-lg border border-gray-100">
+          <p className="text-sm text-gray-600">
+            <span className="font-medium text-primary-700">
+              Step {currentStep} of {LEFT_WORKFLOW_STEPS.length}:
+            </span>{' '}
+            {currentStep === 1 && 'Go to AI Panel (right) → Paste text/upload file → Click Extract'}
+            {currentStep === 2 && 'AI is extracting structured data from your input...'}
+            {currentStep === 3 && 'Fields below are auto-populated. Check "AI Available" badges.'}
+            {currentStep === 4 && 'Go to AI Panel → Click "Assess Impact & Severity"'}
+            {currentStep === 5 && 'Click "Review AI Suggestions" above → Accept/Reject each field'}
+            {currentStep === 6 && 'Click "Save & Submit" below to finalize'}
+            {currentStep === 7 && 'Deviation successfully submitted! All steps complete.'}
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 const severityColors = {
   CRITICAL: 'bg-red-100 text-red-800 border-red-200',
@@ -65,19 +164,42 @@ export default function DeviationForm() {
     }
   }, [current?.id, dispatch])
 
-  // Don't auto-show AI review - let user trigger it from AI panel
+  // Initialize review decisions when extracted data changes
+  useEffect(() => {
+    if (extractedData && Object.keys(extractedData).length > 0) {
+      const decisions = {}
+      Object.keys(extractedData).forEach(key => {
+        decisions[key] = 'pending'
+      })
+      setReviewDecisions(decisions)
+    }
+  }, [extractedData])
+
   const handleAcceptAll = () => {
     if (!extractedData || !current) return
+    
+    // Get valid form fields that can be updated
+    const validFields = formFields.map(f => f.name)
+    const updates = {}
+    
     Object.keys(extractedData).forEach(field => {
-      const suggestion = getAISuggestion(field)
-      if (suggestion) {
-        handleChange(field, suggestion)
+      if (validFields.includes(field)) {
+        const suggestion = getAISuggestion(field)
+        if (suggestion) {
+          updates[field] = suggestion
+        }
       }
     })
+    
+    // Single API call with all updates
+    if (Object.keys(updates).length > 0) {
+      dispatch(updateDeviation({ id: current.id, data: updates }))
+    }
+    
     setReviewDecisions(prev => {
       const next = { ...prev }
       Object.keys(extractedData).forEach(field => {
-        if (getAISuggestion(field)) next[field] = 'accepted'
+        if (getAISuggestion(field) && validFields.includes(field)) next[field] = 'accepted'
       })
       return next
     })
@@ -244,6 +366,17 @@ export default function DeviationForm() {
 
   return (
     <div className="card h-full flex flex-col">
+      {/* Guard against null current */}
+      {!current && (
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center text-gray-500">
+            <FileText className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+            <p>Loading deviation...</p>
+          </div>
+        </div>
+      )}
+      {current && (
+        <div className="card h-full flex flex-col">
       <div className="p-6 border-b border-gray-100 flex items-start justify-between">
         <div>
           <div className="flex items-center gap-3 mb-2">
@@ -264,7 +397,101 @@ export default function DeviationForm() {
         </button>
       </div>
 
+      {/* Workflow Progress Stepper */}
+      <LeftWorkflowStepper 
+        extractedData={extractedData} 
+        impactAssessment={impactAssessment} 
+        aiLoading={aiLoading}
+        current={current}
+        showAIReview={showAIReview}
+      />
+
       <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-thin">
+        {/* AI Review Panel - Always visible when there's extracted data */}
+        {extractedData && Object.keys(extractedData).length > 0 && (
+          <div className="bg-primary-50 border border-primary-200 rounded-xl p-4">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-primary-100 rounded-lg flex items-center justify-center">
+                  <ClipboardCheck className="w-5 h-5 text-primary-600" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-gray-900">AI Suggestions Review</h3>
+                  <p className="text-sm text-gray-500">Accept or reject each AI-suggested field</p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  className="btn-secondary btn-sm"
+                  onClick={() => setShowAIReview(false)}
+                >
+                  <X className="w-3.5 h-3.5 mr-1.5" />
+                  Hide
+                </button>
+                <button
+                  className="btn-primary btn-sm"
+                  onClick={handleAcceptAll}
+                >
+                  <CheckCircle className="w-3.5 h-3.5 mr-1.5" />
+                  Accept All
+                </button>
+              </div>
+            </div>
+            
+            <div className="space-y-3 max-h-96 overflow-y-auto">
+              {formFields
+                .filter(f => hasAISuggestion(f.name))
+                .map((field) => {
+                  const aiValue = getAISuggestion(field.name)
+                  const decision = reviewDecisions[field.name]
+                  return (
+                    <div key={field.name} className="p-4 bg-white border border-gray-200 rounded-lg hover:border-primary-300 transition-colors">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-700">{field.label}</p>
+                          <p className="text-sm text-primary-700 bg-primary-50 px-3 py-1.5 rounded font-mono mt-1 inline-block max-w-full truncate">
+                            {aiValue}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          {decision === 'pending' ? (
+                            <div className="flex gap-2">
+                              <button
+                                className="btn-primary btn-sm"
+                                onClick={() => acceptField(field.name)}
+                              >
+                                <Check className="w-3.5 h-3.5 mr-1" /> Accept
+                              </button>
+                              <button
+                                className="btn-secondary btn-sm"
+                                onClick={() => rejectField(field.name)}
+                              >
+                                <X className="w-3.5 h-3.5 mr-1" /> Reject
+                              </button>
+                            </div>
+                          ) : decision === 'accepted' ? (
+                            <span className="text-green-600 text-sm font-medium flex items-center gap-1">
+                              <CheckCircle className="w-3.5 h-3.5" /> Accepted
+                            </span>
+                          ) : (
+                            <span className="text-gray-500 text-sm font-medium flex items-center gap-1">
+                              <X className="w-3.5 h-3.5" /> Rejected
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+            </div>
+            
+            <div className="mt-4 pt-4 border-t border-primary-100">
+              <p className="text-xs text-gray-500 text-center">
+                {Object.keys(reviewDecisions).filter(k => reviewDecisions[k] === 'accepted').length} of {Object.keys(extractedData).length} fields accepted
+              </p>
+            </div>
+          </div>
+        )}
         <div className="grid gap-4 md:grid-cols-2">
           {formFields
             .filter(f => ['title', 'batch_number', 'product_name', 'process_step', 'equipment_id', 'deviation_date', 'reported_by', 'status'].includes(f.name))
@@ -344,5 +571,7 @@ export default function DeviationForm() {
         )}
       </div>
     </div>
-  )
+  )}
+</div>
+)
 }

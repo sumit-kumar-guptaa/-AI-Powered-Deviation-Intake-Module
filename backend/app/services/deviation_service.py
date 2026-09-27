@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, func
+from sqlalchemy import desc, func, text
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 import uuid
@@ -13,12 +13,13 @@ class DeviationService:
         self.db = db
     
     def generate_deviation_number(self) -> str:
-        """Generate unique deviation number"""
+        """Generate unique deviation number using timestamp to avoid collisions"""
         year = datetime.now().year
-        count = self.db.query(Deviation).filter(
-            Deviation.deviation_number.like(f"DEV-{year}-%")
-        ).count()
-        return f"DEV-{year}-{count + 1:05d}"
+        # Use timestamp + random for uniqueness
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        import random
+        random_suffix = random.randint(100, 999)
+        return f"DEV-{year}-{timestamp}{random_suffix}"
     
     def create(self, deviation_data: DeviationCreate, ai_data: Dict[str, Any] = None) -> Deviation:
         deviation = Deviation(
